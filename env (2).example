@@ -1,0 +1,24 @@
+# Copy this file to .env for local testing with docker-compose.
+# .env is gitignored — never commit real values.
+# On Render itself, these are set in the dashboard / render.yaml instead
+# of a .env file.
+
+PORT=10000
+
+# Fixed secret for encrypting node credentials. Generate any random
+# string, e.g.: openssl rand -hex 32
+NODE_RED_CREDENTIAL_SECRET=changeme-generate-a-real-secret
+
+# Leave both blank to run the editor without login (fine for local
+# testing on localhost only — never leave blank on a public Render URL).
+NODE_RED_USERNAME=
+NODE_RED_PASSWORD_HASH=
+
+# Google OAuth2 Client ID/Secret are NOT set here — they're entered
+# once through the Credential Manager in the Node-RED editor UI
+# (Add -> google-oauth2-credential), encrypted at rest by Node-RED
+# itself. See README "Credential Manager" section.
+
+NODE_OPTIONS=--max-old-space-size=256
+TZ=Asia/Dhaka
+NODE_RED_LOG_LEVEL=info
