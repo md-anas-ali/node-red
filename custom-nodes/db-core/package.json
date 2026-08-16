@@ -1,0 +1,10 @@
+{
+  "name": "node-red-render-db-core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared PostgreSQL persistence layer (pool, migrations, job queue, retention, audit log, health check) for this Node-RED automation server. The only persistent storage backend used by the app — no Redis, no local filesystem state.",
+  "main": "index.js",
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}
