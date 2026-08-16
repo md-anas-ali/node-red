@@ -1,0 +1,15 @@
+{
+  "name": "node-red-render-automation",
+  "version": "1.0.0",
+  "description": "Lightweight Node-RED automation server for Render Free (512MB RAM / 0.1 CPU)",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "node-red": "^4.0.9",
+    "node-red-node-email": "^1.19.0",
+    "node-red-contrib-cron-plus": "^1.1.1",
+    "node-red-contrib-credential-manager": "file:custom-nodes/credential-manager"
+  }
+}

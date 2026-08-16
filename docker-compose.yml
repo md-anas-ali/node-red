@@ -1,0 +1,26 @@
+# For local testing only — Render does NOT use this file, it builds
+# straight from the Dockerfile via render.yaml. This just lets you
+# catch mistakes on your own machine before spending Render build
+# minutes on them.
+#
+# Usage:
+#   cp .env.example .env   # then edit values
+#   docker compose up --build
+#   curl http://localhost:10000/healthz
+#
+# Unlike Render, this mounts ./data as a real local folder, so your
+# flow edits DO persist across `docker compose restart` here — Render's
+# own filesystem is still ephemeral regardless of what you do locally.
+
+services:
+  node-red:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "10000:10000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

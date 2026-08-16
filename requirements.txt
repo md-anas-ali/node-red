@@ -1,0 +1,18 @@
+# Python deps for the venv Node-RED's exec/function nodes shell out to.
+# Pinned to reasonably recent versions as of early 2026 — bump freely,
+# just rebuild the image after changing this file.
+#
+# NOTE: no Google SDK/auth libraries here on purpose. Google OAuth2 is
+# handled entirely by the Credential Manager
+# (custom-nodes/credential-manager/) inside Node-RED — these scripts
+# call Google's REST APIs directly with `requests`, using a
+# short-lived Bearer access token fetched in-process from the
+# credential manager's internal endpoint. See scripts/google_token.py
+# and scripts/gsheet_append.py.
+
+edge-tts==6.1.19
+requests==2.32.3
+Pillow==10.4.0
+yt-dlp==2024.8.6
+beautifulsoup4==4.12.3
+lxml==5.3.0

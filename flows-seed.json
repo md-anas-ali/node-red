@@ -1,0 +1,67 @@
+[
+    {
+        "id": "tab-main",
+        "type": "tab",
+        "label": "Automation",
+        "disabled": false,
+        "info": "Baseline seed flow, baked into the Docker image.\n\nRender Free has no persistent disk, so anything you build in the\neditor here lives only in /data and is LOST on the next redeploy\nor cold start after spin-down. To keep changes permanently:\n  1. Menu (top-right) -> Export -> All flows -> copy to clipboard\n  2. Paste over the contents of flows-seed.json in your repo\n  3. Commit + push -> Render redeploys with your flow baked in\n\nSee scripts/ for example Python helpers (Google Sheets, Edge-TTS,\nyt-dlp) you can call from an exec node, and the README for a\nGoogle Sheets append flow, a TTS+FFmpeg flow, and a retry pattern\nusing the Catch node."
+    },
+    {
+        "id": "health-in",
+        "type": "http in",
+        "z": "tab-main",
+        "name": "GET /healthz",
+        "url": "/healthz",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 150,
+        "y": 80,
+        "wires": [
+            [
+                "health-fn"
+            ]
+        ]
+    },
+    {
+        "id": "health-fn",
+        "type": "function",
+        "z": "tab-main",
+        "name": "OK",
+        "func": "msg.statusCode = 200;\nmsg.headers = { \"content-type\": \"text/plain\" };\nmsg.payload = \"OK\";\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 330,
+        "y": 80,
+        "wires": [
+            [
+                "health-resp"
+            ]
+        ]
+    },
+    {
+        "id": "health-resp",
+        "type": "http response",
+        "z": "tab-main",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 500,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "note-catch",
+        "type": "comment",
+        "z": "tab-main",
+        "name": "Retry / error-handling pattern",
+        "info": "Wire a Catch node (scope: this tab, or specific nodes) to a\nfunction node that checks msg.retryCount and re-injects the\noriginal message through a Delay node (fixed or exponential\nbackoff) back into your flow. Give up and alert (e.g. via the\nemail node) after N attempts. This keeps retry logic visible in\nthe editor instead of hidden in application code.",
+        "x": 200,
+        "y": 220,
+        "wires": []
+    }
+]
