@@ -1,0 +1,29 @@
+<script type="text/javascript">
+    // Minimal, invisible node type — the real work (GET /healthz/deep,
+    // retention timer) happens once at module load in system-health.js,
+    // not when/if an instance of this node is dragged into a flow.
+    // It is intentionally NOT added to flows-seed.json.
+    RED.nodes.registerType('system-health-status', {
+        category: 'config',
+        defaults: {
+            name: { value: 'System Health (PostgreSQL)' },
+        },
+        inputs: 0,
+        outputs: 0,
+        icon: 'font-awesome/fa-heartbeat',
+        label: function () {
+            return this.name || 'System Health (PostgreSQL)';
+        },
+    });
+</script>
+
+<script type="text/html" data-template-name="system-health-status">
+    <div class="form-row">
+        <p>
+            No configuration needed. This registers <code>GET /healthz/deep</code>
+            (PostgreSQL reachability) and a background retention/crash-recovery
+            timer as soon as Node-RED starts — it does not need to be placed on
+            a flow tab to work.
+        </p>
+    </div>
+</script>

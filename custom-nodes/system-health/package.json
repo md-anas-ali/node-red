@@ -1,0 +1,14 @@
+{
+  "name": "node-red-contrib-system-health",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Registers GET /healthz/deep (PostgreSQL reachability check) and a low-overhead periodic retention cleanup job. Does not touch or require changes to any existing flow — the /healthz (shallow) route in flows-seed.json is untouched.",
+  "node-red": {
+    "nodes": {
+      "system-health": "system-health.js"
+    }
+  },
+  "dependencies": {
+    "node-red-render-db-core": "file:../db-core"
+  }
+}
