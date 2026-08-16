@@ -89,7 +89,24 @@ module.exports = {
     },
     debugMaxLength: 500,
     exportGlobalContextKeys: false,
-    functionGlobalContext: {},
+    // Optional: makes the shared PostgreSQL layer (custom-nodes/db-core)
+    // available to function nodes as `global.get('db')` — e.g.
+    // `await global.get('db').jobs.enqueueJob({...})`. Purely additive;
+    // no existing flow needs to change, and nothing breaks if a flow
+    // never touches it. Resolution failure here is non-fatal — it just
+    // means `global.get('db')` is undefined until DB_POSTGRESDB_CONNECTION_URL
+    // is configured; the module itself still requires that env var to
+    // actually run a query.
+    functionGlobalContext: {
+        db: (() => {
+            try {
+                return require('node-red-render-db-core');
+            } catch (err) {
+                console.error('[settings.js] node-red-render-db-core not available:', err.message);
+                return undefined;
+            }
+        })(),
+    },
     functionExternalModules: false,
 
     editorTheme: {

@@ -106,11 +106,10 @@ COPY entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh scripts/*.sh 2>/dev/null; \
     chmod +x /entrypoint.sh && \
-    useradd -m -u 1000 -s /usr/sbin/nologin nodered && \
     mkdir -p /data /tmp/nr-work /tmp/secrets && \
-    chown -R nodered:nodered /data /tmp/nr-work /tmp/secrets $NODE_RED_HOME
+    chown -R node:node /data /tmp/nr-work /tmp/secrets $NODE_RED_HOME
 
-USER nodered
+USER node
 
 EXPOSE 10000
 

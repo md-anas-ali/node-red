@@ -17,9 +17,32 @@ services:
     region: singapore # change to whichever region is closest to you
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    # Render's own restart/traffic gating uses this shallow check (just
+    # confirms the HTTP server is up) so a transient DB hiccup doesn't
+    # trigger a restart loop. GET /healthz/deep (added by
+    # custom-nodes/system-health) also exists for manual/external
+    # monitoring and additionally verifies PostgreSQL is reachable.
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
+      # REQUIRED. PostgreSQL is the only persistent storage this app
+      # uses (no Redis, no local-filesystem fallback) — see
+      # custom-nodes/db-core/ and scripts/db-bootstrap.js. Point this
+      # at a Render PostgreSQL instance (or any reachable Postgres);
+      # set it in the dashboard (Advanced -> Environment) since it's a
+      # secret and shouldn't live in this file.
+      - key: DB_POSTGRESDB_CONNECTION_URL
+        sync: false
+
+      # Optional DB tuning — safe RAM-conscious defaults are baked into
+      # custom-nodes/db-core/pool.js if these are left unset.
+      # - key: DB_POOL_MAX               # default 3
+      # - key: DB_SSL_REJECT_UNAUTHORIZED # default false (managed PG certs)
+      # - key: RETENTION_JOBS_DAYS       # default 14
+      # - key: RETENTION_EXECUTIONS_DAYS # default 30
+      # - key: RETENTION_AUDIT_DAYS      # default 90
+      # - key: STALE_JOB_MINUTES         # default 15 (crash recovery threshold)
+
       # Generated automatically by Render on first deploy — keeps
       # node credentials stable across restarts (see settings.js).
       - key: NODE_RED_CREDENTIAL_SECRET

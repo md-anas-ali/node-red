@@ -25,20 +25,36 @@ dedicated section below.
 ├── .gitignore
 ├── .env.example
 ├── custom-nodes/
-│   └── credential-manager/                 # Credential Manager (see below)
-│       ├── package.json                    # makes it a local Node-RED node package
-│       ├── google-oauth2-credentials.js    # config node ("the credential") + HTTP routes
-│       ├── google-oauth2-credentials.html  # editor UI for the credential
-│       ├── google-api-request.js           # worker node that USES a credential
-│       ├── google-api-request.html         # editor UI for the worker node
-│       └── lib/
-│           └── oauth2-core.js              # provider-agnostic OAuth2 logic (extension point)
+│   ├── credential-manager/                 # Credential Manager (see below)
+│   │   ├── package.json                    # makes it a local Node-RED node package
+│   │   ├── google-oauth2-credentials.js    # config node ("the credential") + HTTP routes
+│   │   ├── google-oauth2-credentials.html  # editor UI for the credential
+│   │   ├── google-api-request.js           # worker node that USES a credential
+│   │   ├── google-api-request.html         # editor UI for the worker node
+│   │   └── lib/
+│   │       └── oauth2-core.js              # provider-agnostic OAuth2 logic (extension point)
+│   ├── db-core/                            # Shared PostgreSQL layer (see "PostgreSQL storage" below)
+│   │   ├── package.json                    # local package, depends on `pg`
+│   │   ├── index.js                        # combined export (pool + migrate + jobs + retention + health + audit)
+│   │   ├── pool.js                         # connection pool, SSL, safe logging
+│   │   ├── migrate.js                      # migration runner, schema verification, connect-with-retry
+│   │   ├── migrations/
+│   │   │   └── 0001_init.sql               # users/workflows/workflow_versions/jobs/executions/system_settings/audit_logs
+│   │   ├── jobs.js                         # Postgres-only queue: dedup, safe claim, backoff, crash recovery
+│   │   ├── retention.js                    # batched cleanup of old jobs/executions/audit_logs
+│   │   ├── health.js                       # bounded-timeout DB ping for /healthz/deep
+│   │   └── audit.js                        # structured audit_logs writer
+│   └── system-health/                      # Registers GET /healthz/deep + retention timer (no flow changes needed)
+│       ├── package.json
+│       ├── system-health.js
+│       └── system-health.html
 └── scripts/
     ├── ffmpeg_lock.sh
     ├── tts_edge.py
     ├── yt_download.py
     ├── google_token.py                     # Python-side: fetch a live token from the Credential Manager
-    └── gsheet_append.py                    # example: append a row using that token
+    ├── gsheet_append.py                    # example: append a row using that token
+    └── db-bootstrap.js                     # runs before Node-RED: connect w/ backoff, migrate, verify, recover jobs
 ```
 
 **Supporting files beyond the original 6** (not strictly required by
@@ -112,6 +128,119 @@ Credential Manager — no heavy Google SDK loaded into Node-RED's own
 process, and no service account anywhere.
 
 ---
+
+## PostgreSQL storage (`custom-nodes/db-core/`)
+
+PostgreSQL is the **only persistent storage** this app uses — no Redis,
+no other database, no reliance on `/data` (which stays as Node-RED's
+own ephemeral flow storage, unchanged — see "Persisting your flows and
+credentials" below).
+
+### What's in the database
+
+Seven tables, created by `custom-nodes/db-core/migrations/0001_init.sql`:
+
+| Table | Purpose |
+|---|---|
+| `users` | Account data, `password_hash` (bcrypt/argon2 — **never plaintext**), preferences, timestamps |
+| `workflows` | Metadata, ownership, status. `credential_ids` references Credential Manager nodes **by ID only** — never a secret value |
+| `workflow_versions` | Lightweight version history/snapshots per workflow |
+| `jobs` | The job queue itself — status, retries, backoff scheduling |
+| `executions` | Execution history — status, duration, errors (no large binaries; rendered media stays on ephemeral `/tmp`) |
+| `system_settings` | Non-sensitive config flags/rate limits only |
+| `audit_logs` | Lightweight structured audit trail, retention-enforced |
+
+A `schema_migrations` table tracks which migrations have been applied,
+so re-running is always a safe no-op.
+
+### Startup order
+
+`entrypoint.sh` runs `scripts/db-bootstrap.js` **before** Node-RED
+starts:
+
+```
+parse DB_POSTGRESDB_CONNECTION_URL
+  → connect (retry w/ exponential backoff, 5 attempts: 1s/2s/4s/8s/16s)
+  → run pending migrations
+  → verify all 7 required tables exist
+  → recover any job stuck in 'running' from a crashed prior process
+  → clean /tmp/nr-work
+  → start Node-RED
+```
+
+If any step fails, the container **exits non-zero and does not start**
+— there is deliberately no fallback storage to silently fall back to.
+Failures are logged with a generic message; the connection string
+itself is never printed (only host/port/database name, via
+`safeDescribeConnection()` in `pool.js`).
+
+### Job queue
+
+`custom-nodes/db-core/jobs.js` implements a Postgres-only queue tuned
+for the very low concurrency a 0.1 CPU instance actually has:
+
+- **Deduplication** — a partial unique index on `dedupe_key` blocks a
+  second `pending`/`running` job with the same key (finished jobs don't
+  block a legitimate later re-run).
+- **Safe claiming** — `claimNextJob()` uses `FOR UPDATE SKIP LOCKED`,
+  so multiple callers can claim concurrently with no double-processing.
+- **Retry with backoff** — `failJob()` reschedules with
+  `2^attempts` seconds of backoff (capped ~15 min) until `max_attempts`,
+  then marks the job `failed` for good.
+- **Crash recovery** — anything left `running` for longer than
+  `STALE_JOB_MINUTES` (default 15) gets reset to `pending` at the next
+  boot, so a container OOM/restart mid-job doesn't lose it silently.
+
+None of this is wired into `flows-seed.json` automatically — it's a
+library available to flows (via `global.get('db')`, see below) and to
+future application code, not a forced behavior change to existing
+flows.
+
+### Using it from a flow (optional, opt-in)
+
+`settings.js` exposes the whole module as `global.get('db')` inside
+function nodes:
+
+```js
+// inside a Function node
+const db = global.get('db');
+await db.jobs.enqueueJob({ jobType: 'render-video', dedupeKey: msg.videoId, payload: msg.payload });
+```
+
+This is purely additive — no existing flow needs to change, and
+nothing breaks if a flow never touches it.
+
+### Health checks
+
+- `GET /healthz` (unchanged, in `flows-seed.json`) — always `200 OK`,
+  gates Render's own restart/traffic decisions (`healthCheckPath` in
+  `render.yaml`). Deliberately shallow so a transient DB hiccup can't
+  trigger a restart loop.
+- `GET /healthz/deep` (new, `custom-nodes/system-health/`) — pings
+  PostgreSQL with a 2s timeout, returns `{ status, db: { ok, latencyMs } }`.
+  For manual/external monitoring, not wired into Render's own
+  healthcheck gate.
+
+### Retention
+
+`custom-nodes/db-core/retention.js` runs automatically every
+`RETENTION_INTERVAL_MS` (default 6h, via `system-health`), deleting in
+batches of 500:
+
+| Data | Default retention |
+|---|---|
+| Finished (`success`/`failed`) jobs | 14 days (`RETENTION_JOBS_DAYS`) |
+| Executions | 30 days (`RETENTION_EXECUTIONS_DAYS`) |
+| Audit logs | 90 days (`RETENTION_AUDIT_DAYS`) |
+
+### Local testing
+
+`docker-compose.yml` now also starts a local `postgres:16-alpine`
+service and points `DB_POSTGRESDB_CONNECTION_URL` at it automatically
+— `docker compose up --build` works with no extra setup. This is
+dev-only; Render uses a separate managed (or external) PostgreSQL
+instance you provide via the `DB_POSTGRESDB_CONNECTION_URL` env var in
+the dashboard.
 
 ## Credential Manager (n8n-style, Google OAuth2 first)
 
@@ -315,6 +444,13 @@ within the hour, unlike a service-account key or a refresh token.
 
 | Variable | Required | Purpose |
 |---|---|---|
+| `DB_POSTGRESDB_CONNECTION_URL` | **required** | PostgreSQL connection string — the only persistent storage this app uses. Container refuses to start without it (see "PostgreSQL storage" above). |
+| `DB_POOL_MAX` | optional (default `3`) | Max pooled connections — kept small deliberately for a 512MB instance. |
+| `DB_SSL_DISABLE` | optional (default off) | Set `true` only for a local, non-TLS Postgres (e.g. local `docker compose`). Never set on Render. |
+| `DB_SSL_REJECT_UNAUTHORIZED` | optional (default `false`) | Set `true` if your Postgres provider's cert chain validates cleanly and you want strict verification. |
+| `RETENTION_JOBS_DAYS` / `RETENTION_EXECUTIONS_DAYS` / `RETENTION_AUDIT_DAYS` | optional (defaults `14`/`30`/`90`) | Auto-cleanup thresholds, see "Retention" above. |
+| `RETENTION_INTERVAL_MS` | optional (default 6h) | How often the retention/crash-recovery cycle runs. |
+| `STALE_JOB_MINUTES` | optional (default `15`) | How long a job can sit `running` before crash recovery resets it to `pending`. |
 | `PORT` | auto (Render sets it) | HTTP port Node-RED binds to |
 | `NODE_RED_CREDENTIAL_SECRET` | recommended | Fixed key encrypting all node credentials — including the Credential Manager's Google tokens. Without it, Node-RED generates one at boot, invalidated every redeploy on ephemeral storage. `render.yaml` sets `generateValue: true`. |
 | `NODE_RED_USERNAME` / `NODE_RED_PASSWORD_HASH` | strongly recommended | Locks the editor (`/admin`) and admin API behind login. Generate the hash with `node -e "console.log(require('bcryptjs').hashSync('yourpassword', 8))"`. |
@@ -333,6 +469,12 @@ the Credential Manager UI, by design.
 `200 OK`, independent of anything else in your flows. `render.yaml` sets
 `healthCheckPath: /healthz`. The Dockerfile also adds a local
 `HEALTHCHECK` using the same endpoint via `curl`.
+
+`custom-nodes/system-health/` additionally registers `GET /healthz/deep`,
+which pings PostgreSQL (2s timeout) and returns latency — useful for
+external monitoring, deliberately **not** used as Render's own
+`healthCheckPath` so a slow/blipping DB doesn't trigger a restart loop
+on top of whatever's already wrong.
 
 ## 10. RAM optimization — approximate budget
 
@@ -357,26 +499,42 @@ Concrete steps taken to stay under 512 MB:
    (`flock` + `-threads 1`).
 5. **Nothing is buffered fully into memory.** yt-dlp/edge-tts write
    straight to `/tmp` (`TMPDIR=/tmp/nr-work`), wiped on every boot.
-6. **Diagnostics, runtimeState, metrics, audit logging, and Projects
-   (git) are disabled** in `settings.js`.
+6. **Diagnostics, runtimeState, metrics, and Projects (git) are
+   disabled** in `settings.js`. (Audit logging is now enabled — but it's
+   a handful of lightweight `INSERT`s into PostgreSQL, not the verbose
+   in-process audit trail Node-RED's own `logging.audit` flag controls.)
 7. **No `node-red-dashboard`** — common RAM hog, not in requirements.
+8. **The PostgreSQL pool is capped at `DB_POOL_MAX=3`** connections — a
+   0.1 CPU instance has no real concurrency to exploit a bigger pool,
+   and each idle connection costs a little RAM.
 
 ## 11. Deploying to Render
 
 1. Push this folder to a GitHub/GitLab repo.
-2. Render dashboard → **New +** → **Blueprint** → select the repo.
-3. Fill in the `sync: false` env vars: `NODE_RED_USERNAME`,
-   `NODE_RED_PASSWORD_HASH`. (Google Client ID/Secret are entered later,
-   through the Credential Manager in the editor — never here.)
-4. Click **Apply**/**Create**. First build takes a few minutes (compiling
-   Pillow/lxml wheels). Watch **Logs** — `entrypoint.sh`'s diagnostic
-   lines confirm Node/Python/ffmpeg versions once it's up.
-5. Visit `https://<your-service>.onrender.com/healthz` → `OK`. Visit
-   `/admin` → editor (behind login if you set the auth vars).
-6. **Expect spin-down.** Render Free sleeps after ~15 minutes idle; the
-   next request cold-starts in ~30–60s. Scheduled/cron flows only fire
-   while the instance is awake — treat timing as best-effort on Free, or
-   upgrade to Starter ($7/mo, always-on) for reliability.
+2. Provision a PostgreSQL instance (Render's own managed Postgres, or
+   any reachable external one) and copy its connection string.
+3. Render dashboard → **New +** → **Blueprint** → select the repo.
+4. Fill in the `sync: false` env vars: `DB_POSTGRESDB_CONNECTION_URL`,
+   `NODE_RED_USERNAME`, `NODE_RED_PASSWORD_HASH`. (Google Client
+   ID/Secret are entered later, through the Credential Manager in the
+   editor — never here.)
+5. Click **Apply**/**Create**. First build takes a few minutes (compiling
+   Pillow/lxml wheels). Watch **Logs** — you should see
+   `[db-bootstrap]` lines confirming connection, migrations, and schema
+   verification, then `entrypoint.sh`'s Node/Python/ffmpeg diagnostic
+   lines, before Node-RED itself starts. If the database is unreachable
+   or misconfigured, the container will exit here rather than start in
+   a broken state — check the `[db-bootstrap] FATAL:` line.
+6. Visit `https://<your-service>.onrender.com/healthz` → `OK`, and
+   `/healthz/deep` → `{"status":"ok","db":{...}}`. Visit `/admin` →
+   editor (behind login if you set the auth vars).
+7. **Expect spin-down.** Render Free sleeps after ~15 minutes idle; the
+   next request cold-starts in ~30–60s (plus the DB bootstrap checks
+   above running again). Scheduled/cron flows only fire while the
+   instance is awake — treat timing as best-effort on Free, or upgrade
+   to Starter ($7/mo, always-on) for reliability. PostgreSQL data itself
+   is unaffected by spin-down — it lives in your Postgres instance, not
+   this container.
 
 ### Persisting your flows and credentials
 
@@ -397,10 +555,14 @@ Render auto-deploys on push (`autoDeploy: true`).
 ## 12. Final validation checklist
 
 - [ ] Repo pushed; `render.yaml` at the path Render expects
+- [ ] PostgreSQL instance provisioned; `DB_POSTGRESDB_CONNECTION_URL` set
 - [ ] `NODE_RED_USERNAME` / `NODE_RED_PASSWORD_HASH` set
 - [ ] `NODE_RED_CREDENTIAL_SECRET` generated/set — also encrypts Google
       OAuth2 tokens
-- [ ] First deploy succeeds; `/healthz` returns `200 OK`
+- [ ] First deploy succeeds; logs show `[db-bootstrap]` connect →
+      migrate → schema verified → job recovery, before Node-RED starts
+- [ ] `/healthz` returns `200 OK`; `/healthz/deep` returns
+      `{"status":"ok","db":{...}}`
 - [ ] `/admin` loads the editor and prompts for login
 - [ ] Created a `google-oauth2-credentials` config node, added its
       Redirect URL to Google Cloud Console, pasted in Client ID/Secret,
@@ -414,6 +576,8 @@ Render auto-deploys on push (`autoDeploy: true`).
       PATH is wired correctly
 - [ ] Tested one ffmpeg job via `scripts/ffmpeg_lock.sh`
 - [ ] Exported the flow and updated `flows-seed.json` in git
+- [ ] Confirmed redeploying/restarting the container does **not** lose
+      job/execution/audit history (it's in Postgres, not `/data`)
 - [ ] Comfortable with Free-tier spin-down for time-sensitive cron flows,
       and with reconnecting Google after a redeploy
 

@@ -4,13 +4,19 @@
 # minutes on them.
 #
 # Usage:
-#   cp .env.example .env   # then edit values
+#   cp .env.example .env   # then edit values (DB_POSTGRESDB_CONNECTION_URL
+#   is pre-filled below to point at the local `postgres` service, so you
+#   normally don't need to touch it for local testing)
 #   docker compose up --build
 #   curl http://localhost:10000/healthz
+#   curl http://localhost:10000/healthz/deep
 #
 # Unlike Render, this mounts ./data as a real local folder, so your
 # flow edits DO persist across `docker compose restart` here — Render's
 # own filesystem is still ephemeral regardless of what you do locally.
+# PostgreSQL data is likewise kept in a named volume here purely for
+# local convenience; on Render, PostgreSQL is a separate managed
+# service and is the only thing that actually persists.
 
 services:
   node-red:
@@ -21,6 +27,38 @@ services:
       - "10000:10000"
     env_file:
       - .env
+    environment:
+      # Local-only default (no TLS on the compose network) — pointed at
+      # the `postgres` service below. Overridden by .env if you set
+      # DB_POSTGRESDB_CONNECTION_URL there instead (e.g. to test against
+      # a real Render PostgreSQL instance from your machine).
+      DB_POSTGRESDB_CONNECTION_URL: ${DB_POSTGRESDB_CONNECTION_URL:-postgres://nodered:nodered@postgres:5432/nodered}
+      DB_SSL_DISABLE: ${DB_SSL_DISABLE:-true}
     volumes:
       - ./data:/data
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Local-only PostgreSQL for `docker compose up`. Render does NOT use
+  # this — in production you point DB_POSTGRESDB_CONNECTION_URL at a
+  # real (Render-managed or external) PostgreSQL instance instead. No
+  # Redis or other datastore is used anywhere in this project.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nodered
+      POSTGRES_PASSWORD: nodered
+      POSTGRES_DB: nodered
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nodered -d nodered"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:

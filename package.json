@@ -10,6 +10,9 @@
     "node-red": "^4.0.9",
     "node-red-node-email": "^1.19.0",
     "node-red-contrib-cron-plus": "^1.1.1",
-    "node-red-contrib-credential-manager": "file:custom-nodes/credential-manager"
+    "node-red-contrib-credential-manager": "file:custom-nodes/credential-manager",
+    "pg": "^8.13.1",
+    "node-red-render-db-core": "file:custom-nodes/db-core",
+    "node-red-contrib-system-health": "file:custom-nodes/system-health"
   }
 }

@@ -62,6 +62,21 @@ rm -rf /tmp/nr-work/* 2>/dev/null || true
 mkdir -p /tmp/nr-work
 export TMPDIR=/tmp/nr-work
 
+# --- 3b. PostgreSQL bootstrap (connect w/ backoff, migrate, verify, ------
+#         recover crashed jobs) — PostgreSQL is the ONLY persistent
+#         storage this app uses (no Redis, no local-filesystem
+#         fallback). If this fails, the container must NOT start: there
+#         is nowhere else for data to safely live. See
+#         scripts/db-bootstrap.js and custom-nodes/db-core/.
+if [ -z "$DB_POSTGRESDB_CONNECTION_URL" ]; then
+  echo "[entrypoint] FATAL: DB_POSTGRESDB_CONNECTION_URL is not set."
+  echo "[entrypoint]        PostgreSQL is required — there is no fallback storage."
+  exit 1
+fi
+echo "[entrypoint] Running PostgreSQL startup checks (connect, migrate, verify schema, recover jobs)..."
+node "$NODE_RED_HOME/scripts/db-bootstrap.js"
+echo "[entrypoint] PostgreSQL startup checks passed."
+
 # --- 4. Runtime diagnostics ------------------------------------------------
 echo "[entrypoint] PORT   = ${PORT:-10000}"
 echo "[entrypoint] Node   = $(node -v)"
