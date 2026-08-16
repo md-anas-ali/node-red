@@ -1,0 +1,12 @@
+{
+  "name": "node-red-contrib-credential-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Centralized, encrypted OAuth2 Credential Manager for this Node-RED instance — starts with Google OAuth2, built to be extensible to other providers via lib/oauth2-core.js. No secrets are hardcoded anywhere; Client ID/Secret and tokens are entered through the editor UI and stored encrypted using Node-RED's own credential store.",
+  "node-red": {
+    "nodes": {
+      "google-oauth2-credentials": "google-oauth2-credentials.js",
+      "google-api-request": "google-api-request.js"
+    }
+  }
+}
