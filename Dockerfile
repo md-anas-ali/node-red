@@ -4,9 +4,8 @@
 #
 # Multi-stage build:
 #   1) node-builder    -> installs only production npm deps for Node-RED
-#   2) python-builder   -> builds a Python venv with compiled wheels
-#                         (Pillow, lxml need build headers; we throw this
-#                         stage away so the final image has no compilers)
+#   2) python-builder   -> builds a Python venv (edge-tts/requests/yt-dlp
+#                         install from prebuilt wheels, no compiler needed)
 #   3) final            -> slim runtime image: node + python3 + ffmpeg +
 #                         the pre-built node_modules / venv, running as a
 #                         non-root user under tini.
@@ -46,14 +45,10 @@ RUN npm ci --omit=dev --no-audit --no-fund --install-links \
 # ---------- Stage 2: Python virtualenv ----------
 FROM python:3.12-slim-bookworm AS python-builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        libjpeg62-turbo-dev \
-        zlib1g-dev \
-        libxml2-dev \
-        libxslt1-dev \
-    && rm -rf /var/lib/apt/lists/*
-
+# No apt packages needed here: edge-tts/requests/yt-dlp all ship
+# prebuilt manylinux wheels for this platform (verified — nothing in
+# requirements.txt triggers a source build), so no compiler or dev
+# headers are required to build this venv.
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

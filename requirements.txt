@@ -12,7 +12,11 @@
 
 edge-tts==6.1.19
 requests==2.32.3
-Pillow==10.4.0
 yt-dlp==2024.8.6
-beautifulsoup4==4.12.3
-lxml==5.3.0
+
+# Removed during audit (2026-08): Pillow, beautifulsoup4, lxml were
+# declared here but never imported by anything in scripts/ — pure dead
+# weight (they also forced apt build headers into the Dockerfile's
+# python-builder stage just to compile Pillow/lxml). If a future script
+# needs image processing or HTML scraping, re-add the specific package
+# then, not preemptively.

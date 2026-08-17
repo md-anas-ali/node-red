@@ -518,8 +518,7 @@ Concrete steps taken to stay under 512 MB:
    `NODE_RED_USERNAME`, `NODE_RED_PASSWORD_HASH`. (Google Client
    ID/Secret are entered later, through the Credential Manager in the
    editor — never here.)
-5. Click **Apply**/**Create**. First build takes a few minutes (compiling
-   Pillow/lxml wheels). Watch **Logs** — you should see
+5. Click **Apply**/**Create**. First build takes a few minutes. Watch **Logs** — you should see
    `[db-bootstrap]` lines confirming connection, migrations, and schema
    verification, then `entrypoint.sh`'s Node/Python/ffmpeg diagnostic
    lines, before Node-RED itself starts. If the database is unreachable
